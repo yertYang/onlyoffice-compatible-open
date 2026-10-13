@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="base" x1=".15" y1="0" x2=".86" y2="1">
+      <stop stop-color="#5DA5FF"/><stop offset=".48" stop-color="#347CEC"/><stop offset="1" stop-color="#2454CF"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2=".8" y2="1">
+      <stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#E6EEFF"/>
+    </linearGradient>
+    <linearGradient id="sheet" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#43D7A2"/><stop offset=".5" stop-color="#20B984"/><stop offset="1" stop-color="#0B956B"/>
+    </linearGradient>
+    <radialGradient id="light" cx=".18" cy="0" r="1">
+      <stop stop-color="#DCEFFF" stop-opacity=".4"/><stop offset="1" stop-color="#DCEFFF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="baseShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="20" stdDeviation="18" flood-color="#142653" flood-opacity=".23"/>
+    </filter>
+    <filter id="paperShadow" x="-40%" y="-25%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#113882" flood-opacity=".30"/>
+    </filter>
+    <filter id="sheetShadow" x="-30%" y="-30%" width="170%" height="180%">
+      <feDropShadow dx="0" dy="16" stdDeviation="15" flood-color="#123D77" flood-opacity=".32"/>
+    </filter>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="202" fill="url(#base)" filter="url(#baseShadow)"/>
+  <rect x="66" y="66" width="892" height="892" rx="200" fill="url(#light)"/>
+  <rect x="70" y="70" width="884" height="884" rx="196" fill="none" stroke="#FFFFFF" stroke-opacity=".16" stroke-width="4"/>
+  <path d="M276 190H557L686 320V747C686 782 659 808 624 808H276C241 808 215 782 215 747V252C215 217 241 190 276 190Z" fill="url(#paper)" filter="url(#paperShadow)"/>
+  <path d="M557 190V275C557 307 581 331 613 331H686Z" fill="#CCDEFF"/>
+  <path d="M298 369H574" stroke="#5591EB" stroke-width="25" stroke-linecap="round"/>
+  <path d="M298 437H509" stroke="#88AFED" stroke-width="23" stroke-linecap="round"/>
+  <path d="M298 504H476" stroke="#88AFED" stroke-width="23" stroke-linecap="round"/>
+  <path d="M298 571H410" stroke="#AEC7F1" stroke-width="23" stroke-linecap="round"/>
+  <g filter="url(#sheetShadow)">
+    <rect x="452" y="482" width="374" height="350" rx="76" fill="#FFFFFF"/>
+    <rect x="465" y="495" width="348" height="324" rx="65" fill="url(#sheet)"/>
+    <rect x="518" y="554" width="242" height="207" rx="20" fill="none" stroke="#F4FFF9" stroke-width="17"/>
+    <path d="M521 609H757" stroke="#F4FFF9" stroke-width="15"/>
+    <path d="M521 660H757M521 711H757" stroke="#E6FFF4" stroke-opacity=".78" stroke-width="12"/>
+    <path d="M594 612V754M676 612V754" stroke="#E6FFF4" stroke-opacity=".78" stroke-width="12"/>
+    <rect x="526" y="562" width="226" height="40" rx="7" fill="#F4FFF9" fill-opacity=".26"/>
+  </g>
+</svg>
