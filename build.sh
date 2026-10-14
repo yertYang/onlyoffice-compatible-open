@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 ARCH="${ARCH:-arm64}"
-VERSION="1.1"
+VERSION="1.2"
 case "$ARCH" in
   arm64) LABEL="Apple芯片" ;;
   x86_64) LABEL="Intel" ;;
@@ -33,7 +33,7 @@ cat > "$STAGED_APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>local.onlyoffice.compatible-open</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundleVersion</key><string>2</string>
+  <key>CFBundleVersion</key><string>3</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>

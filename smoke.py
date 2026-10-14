@@ -21,7 +21,8 @@ def zipped(parts):
     out = io.BytesIO()
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_STORED) as archive:
         for name, data in parts.items():
-            archive.writestr(name, data)
+            # Stable timestamps make independently generated expected bytes identical.
+            archive.writestr(zipfile.ZipInfo(name, (2020, 1, 1, 0, 0, 0)), data)
     return out.getvalue()
 
 
@@ -93,6 +94,46 @@ def document(packages):
     return parts
 
 
+def native_stream(name, data, encoding='utf-8'):
+    # OLENativeStream fields, independently packed from the Swift parser.
+    label = name.encode(encoding) + b'\0'
+    body = struct.pack('<H', 2) + label + b'C:\\source\\file\0'
+    body += struct.pack('<II', 0, 3) + b'C:\\temp\\file\0'
+    body += struct.pack('<I', len(data)) + data
+    return struct.pack('<I', len(body)) + body
+
+
+def embedded_word():
+    return zipped({
+        '[Content_Types].xml': '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+        '_rels/.rels': f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{REL}/officeDocument" Target="word/document.xml"/></Relationships>',
+        'word/document.xml': '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>嵌入的示例 Word</w:t></w:r></w:p></w:body></w:document>',
+    })
+
+
+def embedded_presentation():
+    return zipped({
+        '[Content_Types].xml': '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/></Types>',
+        'ppt/presentation.xml': '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
+    })
+
+
+def attachment_document(items):
+    parts = document([])
+    objects, rels = [], []
+    for i, item in enumerate(items, 1):
+        target = item.get('target', f'embeddings/attachment{i}.bin')
+        mode = ' TargetMode="External"' if item.get('external') else ''
+        kind = 'Link' if item.get('external') else 'Embed'
+        objects.append(f'<w:p><w:r><w:object><o:OLEObject Type="{kind}" ProgID="{item.get("prog", "Package")}" r:id="rId{i}"/></w:object></w:r></w:p>')
+        rels.append(f'<Relationship Id="rId{i}" Type="{REL}/{item.get("rel", "oleObject")}" Target="{target}"{mode}/>')
+        if not item.get('external'):
+            parts['word/' + target] = item['data']
+    parts['word/document.xml'] = f'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:r="{REL}"><w:body><w:p><w:r><w:t>原正文保留</w:t></w:r></w:p>{"".join(objects)}</w:body></w:document>'
+    parts['word/_rels/document.xml.rels'] = f'<Relationships xmlns="{REL}">{"".join(rels)}</Relationships>'
+    return parts
+
+
 class CompatibilityTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='compatible-open-test-')
@@ -102,7 +143,15 @@ class CompatibilityTests(unittest.TestCase):
         self.temp.cleanup()
 
     def invoke(self, source):
-        return subprocess.run([str(EXE), '--repair', str(source), str(self.base / 'results')], capture_output=True, text=True)
+        return self.action('--repair', source)
+
+    def action(self, action, source):
+        return subprocess.run([str(EXE), action, str(source), str(self.base / 'results')], capture_output=True, text=True, timeout=30)
+
+    def result(self, action, source):
+        proc = self.action(action, source)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout)
 
     def test_conversion_preserves_content_and_is_idempotent(self):
         packages = [workbook(), workbook(6000)]
@@ -148,6 +197,100 @@ class CompatibilityTests(unittest.TestCase):
         source.write_bytes(b'not a ZIP archive')
         self.assertNotEqual(self.invoke(source).returncode, 0)
         self.assertFalse((self.base / 'results').exists())
+
+    def test_mixed_attachments_list_extract_and_process(self):
+        word, book, ppt = embedded_word(), workbook(6000), embedded_presentation()
+        archive = zipped({'说明.txt': 'ZIP 中的内容', 'nested/value.json': '{"value":42}'})
+        pdf = b'%PDF-1.4\n% synthetic attachment\n%%EOF\n'
+        items = [
+            {'data': compound(word, 'Package'), 'prog': 'Word.Document.12'},
+            {'data': compound(book), 'prog': 'Excel.Sheet.12'},
+            {'data': compound(native_stream('资料.zip', archive), '\x01OlE10NaTiVe')},
+            {'data': ppt, 'prog': 'PowerPoint.Show.12', 'target': 'embeddings/slides.pptx', 'rel': 'package'},
+            {'data': compound(pdf, 'CONTENTS'), 'prog': 'AcroExch.Document.DC'},
+            {'target': 'https://example.invalid/linked.docx', 'external': True},
+        ]
+        source = self.base / '混合附件.docx'
+        original = zipped(attachment_document(items)); source.write_bytes(original)
+        listed = self.result('--list', source)
+        self.assertEqual(len(listed['attachments']), 6)
+        self.assertFalse((self.base / 'results').exists(), '--list must not export files')
+        self.assertTrue(all(x['output'] is None for x in listed['attachments']))
+        result = self.result('--process', source)
+        rows = result['attachments']
+        self.assertEqual([x['type'] for x in rows[:5]], ['docx', 'xlsx', 'zip', 'pptx', 'pdf'])
+        for row, data in zip(rows, [word, book, archive, ppt, pdf]):
+            self.assertTrue(row['canOpen'])
+            self.assertEqual(Path(row['output']).read_bytes(), data)
+        self.assertEqual(rows[2]['name'], '资料.zip')
+        self.assertIsNone(rows[-1]['output'])
+        self.assertFalse(rows[-1]['canOpen'])
+        self.assertEqual(result['converted'], 1)
+        self.assertEqual(source.read_bytes(), original)
+        with zipfile.ZipFile(result['output']) as repaired:
+            self.assertEqual(repaired.read('word/document.xml'), attachment_document(items)['word/document.xml'].encode())
+
+    def test_native_names_collisions_reuse_and_no_traversal(self):
+        data_a, data_b = zipped({'a.txt': 'one'}), zipped({'a.txt': 'two'})
+        names = ['..\\..\\资料.zip', '/tmp/资料.zip', '资料.zip']
+        items = [{'data': compound(native_stream(name, data), '\x01Ole10Native')} for name, data in zip(names, [data_a, data_b, data_a])]
+        source = self.base / 'names.docx'; source.write_bytes(zipped(attachment_document(items)))
+        first = self.result('--extract', source)['attachments']
+        self.assertEqual(Path(first[0]['output']).name, '资料.zip')
+        self.assertEqual(Path(first[1]['output']).name, '资料 (2).zip')
+        self.assertEqual(first[0]['output'], first[2]['output'])
+        self.assertTrue(all(Path(row['output']).parent == self.base / 'results' for row in first))
+        second = self.result('--extract', source)['attachments']
+        self.assertEqual([r['output'] for r in first], [r['output'] for r in second])
+        self.assertEqual(len(list((self.base / 'results').iterdir())), 2)
+
+    def test_empty_zip_gbk_name_and_corrupt_object_are_isolated(self):
+        empty = zipped({})
+        good = native_stream('中文资料.zip', empty, 'gb18030')
+        bad = native_stream('损坏.zip', empty)[:-10]
+        text = '文本附件内容'.encode()
+        items = [
+            {'data': compound(good, '\x01Ole10Native')},
+            {'data': compound(bad, '\x01Ole10Native')},
+            {'data': compound(native_stream('说明.txt', text), '\x01Ole10Native')},
+        ]
+        source = self.base / 'edge.docx'; source.write_bytes(zipped(attachment_document(items)))
+        result = self.result('--extract', source)
+        rows = result['attachments']
+        self.assertEqual(rows[0]['name'], '中文资料.zip')
+        self.assertEqual(Path(rows[0]['output']).read_bytes(), empty)
+        self.assertIsNone(rows[1]['output'])
+        self.assertEqual(Path(rows[2]['output']).read_bytes(), text)
+        self.assertEqual(len(result['warnings']), 1)
+
+    def test_signature_readonly_export_and_dangerous_container_paths(self):
+        parts = attachment_document([{'data': compound(embedded_word(), 'package'), 'prog': 'Word.Document.12'}])
+        parts['_xmlsignatures/sig1.xml'] = '<Signature/>'
+        source = self.base / 'signed.docx'; original = zipped(parts); source.write_bytes(original)
+        exported = self.result('--extract', source)
+        self.assertEqual(Path(exported['attachments'][0]['output']).read_bytes(), embedded_word())
+        self.assertEqual(source.read_bytes(), original)
+        self.assertNotEqual(self.action('--repair', source).returncode, 0)
+        parts['word/../../../escaped.xml'] = '<x/>'
+        source = self.base / 'traversal.docx'; source.write_bytes(zipped(parts))
+        self.assertNotEqual(self.action('--extract', source).returncode, 0)
+        self.assertNotEqual(self.action('--repair', source).returncode, 0)
+
+    def test_active_and_unknown_files_are_saved_without_open_permission(self):
+        executable = b'MZ' + b'\0' * 80
+        word = embedded_word()
+        items = [
+            {'data': compound(native_stream('program.exe', executable), '\x01Ole10Native')},
+            {'data': compound(native_stream('misleading.exe', word), '\x01Ole10Native')},
+            {'data': compound(native_stream('a.' + 'b' * 250 + '.zip', zipped({})), '\x01Ole10Native')},
+        ]
+        source = self.base / ('a.' + 'b' * 220 + '.docx'); source.write_bytes(zipped(attachment_document(items)))
+        result = self.result('--extract', source)['attachments']
+        self.assertFalse(result[0]['canOpen'])
+        self.assertEqual(Path(result[0]['output']).read_bytes(), executable)
+        self.assertEqual(result[1]['type'], 'docx')
+        self.assertTrue(result[1]['canOpen'])
+        self.assertLessEqual(len(result[2]['name'].encode()), 210)
 
 
 if __name__ == '__main__':
